@@ -85,6 +85,12 @@ export interface GameState {
   timeElapsed: number;
   reactions: string[];
   unlockedLevels: string[];
+  experimentLogs: ExperimentLog[];
+  lastScoreResult?: {
+    stars: number;
+    score: number;
+    feedback: string;
+  };
 }
 
 export interface Particle {
@@ -99,9 +105,43 @@ export interface Particle {
   type: 'bubble' | 'precipitate' | 'spark';
 }
 
+export type ExperimentLogType = 
+  | 'add_reagent' 
+  | 'reaction' 
+  | 'color_change' 
+  | 'heat' 
+  | 'gas' 
+  | 'precipitate'
+  | 'stir'
+  | 'pour_out'
+  | 'reset';
+
+export interface ExperimentLog {
+  id: string;
+  timestamp: number;
+  type: ExperimentLogType;
+  message: string;
+  details?: Record<string, any>;
+}
+
 export interface Recipe {
   name: string;
   reagents: { id: string; amount: number }[];
   result: string;
   createdAt: number;
+  version?: string;
+}
+
+export interface ObjectiveCheckResult {
+  complete: boolean;
+  progress: number;
+  currentValue: string;
+  targetValue: string;
+  difference: string;
+}
+
+export interface StarPrediction {
+  currentStars: number;
+  maxPossibleStars: number;
+  stepsToNextStar: number;
 }

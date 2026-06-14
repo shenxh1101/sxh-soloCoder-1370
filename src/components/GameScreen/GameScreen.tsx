@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Beaker } from '../Beaker/Beaker';
 import { ReagentRack } from '../ReagentRack/ReagentRack';
@@ -6,6 +6,7 @@ import { StatusPanel } from '../StatusPanel/StatusPanel';
 import { Toolbar } from '../Toolbar/Toolbar';
 import { ObjectivePanel } from '../ObjectivePanel/ObjectivePanel';
 import { ResultModal } from '../ResultModal/ResultModal';
+import { ExperimentLog } from '../ExperimentLog/ExperimentLog';
 import { useGameStore } from '@/store/gameStore';
 import { useDragDrop } from '@/hooks/useDragDrop';
 import { useAudio } from '@/hooks/useAudio';
@@ -13,6 +14,7 @@ import { getLevelById, LEVELS } from '@/data/levels';
 import { REAGENTS } from '@/data/reagents';
 import { checkObjective } from '@/logic/chemistry';
 import { calculateScore, ScoreResult } from '@/logic/scoring';
+import { Recipe } from '@/types';
 
 interface GameScreenProps {
   isFreeMode?: boolean;
@@ -29,6 +31,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   const isComplete = useGameStore(state => state.isComplete);
   const activeEffects = useGameStore(state => state.activeEffects);
   const currentLevelId = useGameStore(state => state.currentLevelId);
+  const experimentLogs = useGameStore(state => state.experimentLogs);
+  const lastScoreResult = useGameStore(state => state.lastScoreResult);
+  const stars = useGameStore(state => state.stars);
+  const score = useGameStore(state => state.score);
+  
   const addReagentToBeaker = useGameStore(state => state.addReagentToBeaker);
   const stir = useGameStore(state => state.stir);
   const pourOut = useGameStore(state => state.pourOut);
@@ -37,23 +44,56 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   const checkLevelComplete = useGameStore(state => state.checkLevelComplete);
   const completeLevel = useGameStore(state => state.completeLevel);
   const exportRecipe = useGameStore(state => state.exportRecipe);
+  const importRecipe = useGameStore(state => state.importRecipe);
   const setCurrentLevel = useGameStore(state => state.setCurrentLevel);
   const setMode = useGameStore(state => state.setMode);
+  const ensureCurrentLevelFromUrl = useGameStore(state => state.ensureCurrentLevelFromUrl);
+  const getDetailedObjectiveCheck = useGameStore(state => state.getDetailedObjectiveCheck);
+  const getStarPrediction = useGameStore(state => state.getStarPrediction);
+  const clearExperimentLogs = useGameStore(state => state.clearExperimentLogs);
 
   const [isStirring, setIsStirring] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [scoreResult, setScoreResult] = useState<ScoreResult | null>(null);
+  const [showExperimentLog, setShowExperimentLog] = useState(true);
 
-  const level = isFreeMode ? null : getLevelById(levelId || currentLevelId || '');
+  const effectiveLevelId = levelId || currentLevelId;
+  const level = isFreeMode ? null : getLevelById(effectiveLevelId || '');
+
+  useEffect(() => {
+    if (!isFreeMode && levelId) {
+      ensureCurrentLevelFromUrl(levelId);
+    } else if (isFreeMode) {
+      setMode('free');
+    }
+  }, [isFreeMode, levelId, ensureCurrentLevelFromUrl, setMode]);
 
   const availableReagents = isFreeMode
     ? REAGENTS.map(r => r.id)
     : level?.availableReagents || [];
 
-  const objectiveProgress = level
-    ? checkObjective(solution, level.objective).progress
-    : 0;
+  const objectiveProgress = useMemo(() => {
+    if (!level) return 0;
+    return checkObjective(solution, level.objective).progress;
+  }, [solution, level]);
+
+  const detailedCheck = useMemo(() => {
+    if (isFreeMode || !level) return null;
+    return getDetailedObjectiveCheck();
+  }, [isFreeMode, level, getDetailedObjectiveCheck, solution.ph, solution.temperature, solution.color, solution.hasGas, solution.hasPrecipitate]);
+
+  const starPrediction = useMemo(() => {
+    if (isFreeMode || !level) return null;
+    return getStarPrediction();
+  }, [isFreeMode, level, getStarPrediction, steps, isComplete]);
+
+  useEffect(() => {
+    if (lastScoreResult && !scoreResult) {
+      setScoreResult(lastScoreResult);
+      setShowResult(true);
+    }
+  }, [lastScoreResult, scoreResult]);
 
   const handleDrop = useCallback(
     (reagentId: string, volume: number) => {
@@ -119,9 +159,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
 
   useEffect(() => {
     if (!isFreeMode && !level && levelId) {
-      setCurrentLevel(levelId);
+      const levelExists = getLevelById(levelId);
+      if (levelExists) {
+        setCurrentLevel(levelId);
+      } else {
+        navigate('/challenge');
+      }
     }
-  }, [isFreeMode, level, levelId, setCurrentLevel]);
+  }, [isFreeMode, level, levelId, setCurrentLevel, navigate]);
 
   const handleStir = () => {
     if (solution.volume === 0) return;
@@ -150,6 +195,16 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
     const name = prompt('请输入配方名称:', `配方_${Date.now()}`);
     if (name !== null) {
       exportRecipe(name);
+    }
+  };
+
+  const handleImport = (recipe: Recipe) => {
+    return importRecipe(recipe);
+  };
+
+  const handleClearLogs = () => {
+    if (confirm('确定要清空实验记录吗？')) {
+      clearExperimentLogs();
     }
   };
 
@@ -193,12 +248,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
     ? LEVELS.findIndex(l => l.id === level.id) < LEVELS.length - 1
     : false;
 
+  const displayScoreResult = scoreResult || lastScoreResult;
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-stone-900 via-stone-800 to-stone-900 flex flex-col">
       <div className="flex-1 p-4 overflow-auto">
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-3 space-y-4">
               <ReagentRack
                 reagentIds={availableReagents}
                 onDragStart={handleDragStart}
@@ -207,6 +264,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
                 dragVolume={dragVolume}
                 setDragVolume={setDragVolume}
               />
+              
+              {showExperimentLog && (
+                <div className="lg:hidden mt-4">
+                  <ExperimentLog
+                    logs={experimentLogs}
+                    onClear={handleClearLogs}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="lg:col-span-5 flex flex-col items-center justify-center py-8">
@@ -229,6 +295,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
                   progress={objectiveProgress}
                   isComplete={isComplete}
                   showHint={showHint}
+                  detailedCheck={detailedCheck}
+                  starPrediction={starPrediction}
+                  currentSteps={steps}
                 />
               )}
               <StatusPanel
@@ -236,6 +305,22 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
                 timeElapsed={timeElapsed}
                 steps={steps}
               />
+              
+              <div className="hidden lg:block">
+                <ExperimentLog
+                  logs={experimentLogs}
+                  onClear={handleClearLogs}
+                />
+              </div>
+
+              <div className="lg:hidden">
+                <button
+                  onClick={() => setShowExperimentLog(!showExperimentLog)}
+                  className="w-full font-pixel text-xs text-cyan-400 bg-stone-800 border-2 border-cyan-600 py-2 px-4 hover:bg-stone-700 transition-colors"
+                >
+                  {showExperimentLog ? '▼ 隐藏实验记录' : '▶ 显示实验记录'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -246,16 +331,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
         onPourOut={handlePourOut}
         onReset={handleReset}
         onExport={isFreeMode ? handleExport : undefined}
+        onImport={isFreeMode ? handleImport : undefined}
         onBack={handleBack}
         onHint={!isFreeMode ? handleHint : undefined}
         isFreeMode={isFreeMode}
         disabled={isComplete && !isFreeMode}
       />
 
-      {!isFreeMode && scoreResult && (
+      {!isFreeMode && displayScoreResult && (
         <ResultModal
           isOpen={showResult}
-          result={scoreResult}
+          result={displayScoreResult}
           levelName={level?.name || ''}
           onRestart={handleRestart}
           onNextLevel={handleNextLevel}
