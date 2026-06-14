@@ -384,26 +384,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
     
     const { starThresholds } = level;
     
-    let currentStars = 0;
+    const calcStars = (s: number): number => {
+      if (s <= starThresholds.three) return 3;
+      else if (s <= starThresholds.two) return 2;
+      else return 1;
+    };
+
+    let currentStars: number;
     if (isComplete) {
-      if (steps <= starThresholds.three) currentStars = 3;
-      else if (steps <= starThresholds.two) currentStars = 2;
-      else currentStars = 1;
+      currentStars = calcStars(steps);
     } else {
-      if (steps < starThresholds.three) currentStars = 3;
-      else if (steps < starThresholds.two) currentStars = 2;
-      else if (steps < starThresholds.one) currentStars = 1;
+      currentStars = calcStars(steps);
     }
     
-    let maxPossibleStars = 1;
-    if (steps < starThresholds.two) maxPossibleStars = 2;
-    if (steps < starThresholds.three) maxPossibleStars = 3;
+    const maxPossibleStars = calcStars(steps);
     
     let stepsToNextStar = 0;
-    if (currentStars === 2 && steps < starThresholds.three) {
-      stepsToNextStar = Math.max(0, starThresholds.three - steps);
-    } else if (currentStars === 1 && steps < starThresholds.two) {
-      stepsToNextStar = Math.max(0, starThresholds.two - steps);
+    if (currentStars === 2) {
+      const needed = starThresholds.three - steps;
+      stepsToNextStar = needed > 0 ? needed : 0;
+    } else if (currentStars === 1) {
+      const needed = starThresholds.two - steps;
+      stepsToNextStar = needed > 0 ? needed : 0;
     }
     
     return { currentStars, maxPossibleStars, stepsToNextStar };
@@ -517,6 +519,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       let solution = createEmptySolution();
       const logs: { type: ExperimentLog['type']; message: string; details?: Record<string, any> }[] = [];
+      const allReactionDescriptions: string[] = [];
       
       logs.push({
         type: 'reset',
@@ -540,6 +543,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
           return { success: false, error: '总容量超过500mL限制' };
         }
 
+        const oldColor = solution.color;
+        const oldTemperature = solution.temperature;
+
         const result = addReagent(solution, item.id, volumeMl);
         solution = result.solution;
         
@@ -555,6 +561,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         });
 
         for (const reaction of result.reactions) {
+          allReactionDescriptions.push(reaction.description);
+          
           logs.push({
             type: 'reaction',
             message: reaction.description,
@@ -562,6 +570,58 @@ export const useGameStore = create<GameStore>((set, get) => ({
               reactionId: reaction.id,
               equation: reaction.equation,
             },
+          });
+          
+          for (const product of reaction.products) {
+            if (product.type === 'gas') {
+              logs.push({
+                type: 'gas',
+                message: `产生气体！强度: ${Math.round(product.intensity * 100)}%`,
+                details: { intensity: product.intensity },
+              });
+            } else if (product.type === 'precipitate') {
+              logs.push({
+                type: 'precipitate',
+                message: `生成${product.value.color === '#ffffff' ? '白色' : '有色'}沉淀`,
+                details: { color: product.value.color },
+              });
+            } else if (product.type === 'heat') {
+              const tempChange = product.value * product.intensity;
+              if (tempChange > 0) {
+                logs.push({
+                  type: 'heat',
+                  message: `放热！温度上升 +${tempChange.toFixed(1)}°C`,
+                  details: { temperatureChange: tempChange },
+                });
+              }
+            } else if (product.type === 'colorChange') {
+              logs.push({
+                type: 'color_change',
+                message: `颜色变化：${oldColor} → ${product.value}`,
+                details: { fromColor: oldColor, toColor: product.value },
+              });
+            }
+          }
+        }
+        
+        if (solution.color !== oldColor && result.reactions.every(r => 
+          !r.products.some(p => p.type === 'colorChange')
+        )) {
+          logs.push({
+            type: 'color_change',
+            message: `颜色变化：${oldColor} → ${solution.color}`,
+            details: { fromColor: oldColor, toColor: solution.color },
+          });
+        }
+        
+        if (Math.abs(solution.temperature - oldTemperature) > 1 && 
+            result.reactions.every(r => !r.products.some(p => p.type === 'heat' || p.type === 'cool'))
+        ) {
+          const change = solution.temperature - oldTemperature;
+          logs.push({
+            type: 'heat',
+            message: `温度${change > 0 ? '上升' : '下降'} ${Math.abs(change).toFixed(1)}°C`,
+            details: { temperatureChange: change },
           });
         }
       }
@@ -580,6 +640,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         score: 0,
         stars: 0,
         timeElapsed: 0,
+        reactions: allReactionDescriptions,
+        activeReactions: [],
+        activeEffects: { gasIntensity: 0, heatIntensity: 0 },
         lastScoreResult: undefined,
       });
 
