@@ -2,13 +2,14 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 interface PixelButtonProps {
-  children: React.ReactNode;
-  onClick?: () => void;
-  variant?: 'primary' | 'secondary' | 'danger' | 'success';
+  children?: React.ReactNode;
+  onClick?: (e?: React.MouseEvent) => void;
+  variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning';
   size?: 'sm' | 'md' | 'lg';
   disabled?: boolean;
   className?: string;
   icon?: React.ReactNode;
+  title?: string;
 }
 
 const variantStyles = {
@@ -16,6 +17,7 @@ const variantStyles = {
   secondary: 'bg-stone-600 hover:bg-stone-500 text-white',
   danger: 'bg-red-600 hover:bg-red-500 text-white',
   success: 'bg-green-600 hover:bg-green-500 text-white',
+  warning: 'bg-amber-600 hover:bg-amber-500 text-white',
 };
 
 const sizeStyles = {
@@ -32,11 +34,13 @@ export const PixelButton: React.FC<PixelButtonProps> = ({
   disabled = false,
   className,
   icon,
+  title,
 }) => {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={cn(
         'font-pixel relative inline-flex items-center justify-center gap-2',
         'border-2 border-b-4 border-r-4 border-black',

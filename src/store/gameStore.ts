@@ -1,10 +1,19 @@
 import { create } from 'zustand';
-import { Solution, Reaction, GameState, Recipe, ExperimentLog, StarPrediction, ObjectiveCheckResult } from '../types';
+import { Solution, Reaction, GameState, Recipe, ExperimentLog, StarPrediction, ObjectiveCheckResult, SavedRecipe, ReplayStep } from '../types';
 import { createEmptySolution, addReagent, stirSolution, pourOutSolution, checkObjective } from '../logic/chemistry';
 import { calculateScore, saveProgress, loadProgress, getUnlockedLevels } from '../logic/scoring';
 import { getLevelById } from '../data/levels';
 import { getReagentById } from '../data/reagents';
 import { hexToRgb } from '../utils/colorMix';
+import {
+  loadSavedRecipes,
+  saveCurrentRecipe,
+  updateRecipeName as libUpdateRecipeName,
+  updateRecipeNotes as libUpdateRecipeNotes,
+  deleteRecipe as libDeleteRecipe,
+  getRecipeById as libGetRecipeById,
+  buildReplaySteps,
+} from '../utils/recipeLibrary';
 
 interface GameStore extends GameState {
   activeEffects: { gasIntensity: number; heatIntensity: number };
@@ -25,6 +34,16 @@ interface GameStore extends GameState {
   clearExperimentLogs: () => void;
   getStarPrediction: () => StarPrediction;
   getDetailedObjectiveCheck: () => ObjectiveCheckResult | null;
+  getSavedRecipes: () => SavedRecipe[];
+  saveRecipeToLibrary: (name: string, notes?: string) => SavedRecipe | null;
+  renameSavedRecipe: (recipeId: string, newName: string) => SavedRecipe | null;
+  updateSavedRecipeNotes: (recipeId: string, notes: string) => SavedRecipe | null;
+  deleteSavedRecipe: (recipeId: string) => boolean;
+  loadSavedRecipe: (recipeId: string) => { success: boolean; error?: string };
+  getReplaySteps: () => ReplayStep[];
+  setReplayState: (step: ReplayStep | null) => void;
+  isInReplayMode: boolean;
+  currentReplayStep: ReplayStep | null;
 }
 
 const initialSolution = createEmptySolution();
@@ -48,6 +67,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   activeEffects: { gasIntensity: 0, heatIntensity: 0 },
   experimentLogs: [],
   lastScoreResult: undefined,
+  isInReplayMode: false,
+  currentReplayStep: null,
 
   setMode: (mode) => {
     set({ mode });
@@ -633,23 +654,113 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }));
 
       set({
-        solution,
+        solution: JSON.parse(JSON.stringify(solution)),
         steps: recipe.reagents.length,
-        experimentLogs: formattedLogs,
+        experimentLogs: JSON.parse(JSON.stringify(formattedLogs)),
         isComplete: false,
         score: 0,
         stars: 0,
         timeElapsed: 0,
-        reactions: allReactionDescriptions,
+        reactions: JSON.parse(JSON.stringify(allReactionDescriptions)),
         activeReactions: [],
         activeEffects: { gasIntensity: 0, heatIntensity: 0 },
         lastScoreResult: undefined,
+        isInReplayMode: false,
+        currentReplayStep: null,
       });
 
       return { success: true };
     } catch (e) {
       console.error('Import error:', e);
       return { success: false, error: '导入失败：' + (e as Error).message };
+    }
+  },
+
+  getSavedRecipes: () => {
+    return loadSavedRecipes();
+  },
+
+  saveRecipeToLibrary: (name, notes) => {
+    const { solution, experimentLogs, steps } = get();
+    if (solution.components.length === 0) return null;
+
+    return saveCurrentRecipe(
+      name,
+      solution,
+      solution.components.map(c => ({ id: c.reagentId, amount: c.amount })),
+      experimentLogs,
+      steps,
+      notes
+    );
+  },
+
+  renameSavedRecipe: (recipeId, newName) => {
+    return libUpdateRecipeName(recipeId, newName);
+  },
+
+  updateSavedRecipeNotes: (recipeId, notes) => {
+    return libUpdateRecipeNotes(recipeId, notes);
+  },
+
+  deleteSavedRecipe: (recipeId) => {
+    return libDeleteRecipe(recipeId);
+  },
+
+  loadSavedRecipe: (recipeId) => {
+    const recipe = libGetRecipeById(recipeId);
+    if (!recipe) {
+      return { success: false, error: '配方不存在' };
+    }
+
+    const importFormat: Recipe = {
+      name: recipe.name,
+      reagents: recipe.reagents,
+      result: `pH: ${recipe.result.ph.toFixed(2)}, 温度: ${recipe.result.temperature.toFixed(1)}°C`,
+      createdAt: recipe.createdAt,
+      version: '1.0',
+    };
+
+    const result = get().importRecipe(importFormat);
+    return result;
+  },
+
+  getReplaySteps: () => {
+    const { solution } = get();
+    const reagents = solution.components.map(c => ({ id: c.reagentId, amount: c.amount }));
+    return buildReplaySteps(reagents);
+  },
+
+  setReplayState: (step) => {
+    if (step === null) {
+      const { solution, experimentLogs, steps } = get();
+      const originalReagents = solution.components.map(c => ({ id: c.reagentId, amount: c.amount }));
+      
+      let rebuiltSolution = createEmptySolution();
+      for (const item of originalReagents) {
+        const volumeMl = Math.round((item.amount * 1000) / (getReagentById(item.id)?.concentration || 1));
+        const result = addReagent(rebuiltSolution, item.id, volumeMl);
+        rebuiltSolution = result.solution;
+      }
+
+      set({
+        isInReplayMode: false,
+        currentReplayStep: null,
+        solution: rebuiltSolution,
+        steps,
+        experimentLogs,
+        activeEffects: { gasIntensity: 0, heatIntensity: 0 },
+        activeReactions: [],
+      });
+    } else {
+      set({
+        isInReplayMode: true,
+        currentReplayStep: step,
+        solution: JSON.parse(JSON.stringify(step.solution)),
+        steps: step.stepIndex,
+        experimentLogs: JSON.parse(JSON.stringify(step.logs)),
+        activeEffects: { gasIntensity: 0, heatIntensity: 0 },
+        activeReactions: [],
+      });
     }
   },
 }));

@@ -7,6 +7,9 @@ import { Toolbar } from '../Toolbar/Toolbar';
 import { ObjectivePanel } from '../ObjectivePanel/ObjectivePanel';
 import { ResultModal } from '../ResultModal/ResultModal';
 import { ExperimentLog } from '../ExperimentLog/ExperimentLog';
+import { RecipeLibrary } from '../RecipeLibrary/RecipeLibrary';
+import { ReplayPlayback } from '../ReplayPlayback/ReplayPlayback';
+import { RecipeCompare } from '../RecipeCompare/RecipeCompare';
 import { useGameStore } from '@/store/gameStore';
 import { useDragDrop } from '@/hooks/useDragDrop';
 import { useAudio } from '@/hooks/useAudio';
@@ -14,11 +17,13 @@ import { getLevelById, LEVELS } from '@/data/levels';
 import { REAGENTS } from '@/data/reagents';
 import { checkObjective } from '@/logic/chemistry';
 import { calculateScore, ScoreResult } from '@/logic/scoring';
-import { Recipe } from '@/types';
+import { Recipe, SavedRecipe } from '@/types';
 
 interface GameScreenProps {
   isFreeMode?: boolean;
 }
+
+type RightPanelMode = 'default' | 'replay' | 'library' | 'compare-select';
 
 export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) => {
   const navigate = useNavigate();
@@ -33,8 +38,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   const currentLevelId = useGameStore(state => state.currentLevelId);
   const experimentLogs = useGameStore(state => state.experimentLogs);
   const lastScoreResult = useGameStore(state => state.lastScoreResult);
-  const stars = useGameStore(state => state.stars);
-  const score = useGameStore(state => state.score);
+  const isInReplayMode = useGameStore(state => state.isInReplayMode);
+  const currentReplayStep = useGameStore(state => state.currentReplayStep);
   
   const addReagentToBeaker = useGameStore(state => state.addReagentToBeaker);
   const stir = useGameStore(state => state.stir);
@@ -51,12 +56,33 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   const getDetailedObjectiveCheck = useGameStore(state => state.getDetailedObjectiveCheck);
   const getStarPrediction = useGameStore(state => state.getStarPrediction);
   const clearExperimentLogs = useGameStore(state => state.clearExperimentLogs);
+  const getSavedRecipes = useGameStore(state => state.getSavedRecipes);
+  const saveRecipeToLibrary = useGameStore(state => state.saveRecipeToLibrary);
+  const renameSavedRecipe = useGameStore(state => state.renameSavedRecipe);
+  const deleteSavedRecipe = useGameStore(state => state.deleteSavedRecipe);
+  const loadSavedRecipe = useGameStore(state => state.loadSavedRecipe);
+  const getReplaySteps = useGameStore(state => state.getReplaySteps);
+  const setReplayState = useGameStore(state => state.setReplayState);
 
   const [isStirring, setIsStirring] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [scoreResult, setScoreResult] = useState<ScoreResult | null>(null);
   const [showExperimentLog, setShowExperimentLog] = useState(true);
+  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('default');
+  const [savedRecipesVersion, setSavedRecipesVersion] = useState(0);
+  const [compareRecipe, setCompareRecipe] = useState<SavedRecipe | null>(null);
+
+  const refreshSavedRecipes = useCallback(() => {
+    setSavedRecipesVersion(v => v + 1);
+  }, []);
+
+  const savedRecipes = useMemo(() => {
+    const r = getSavedRecipes();
+    return r;
+  }, [getSavedRecipes, savedRecipesVersion]);
+
+  const replaySteps = useMemo(() => getReplaySteps(), [getReplaySteps, savedRecipesVersion, isInReplayMode]);
 
   const effectiveLevelId = levelId || currentLevelId;
   const level = isFreeMode ? null : getLevelById(effectiveLevelId || '');
@@ -95,8 +121,20 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
     }
   }, [lastScoreResult, scoreResult]);
 
+  useEffect(() => {
+    if (isInReplayMode && rightPanelMode !== 'replay') {
+      setRightPanelMode('replay');
+    } else if (!isInReplayMode && rightPanelMode === 'replay') {
+      setRightPanelMode('default');
+    }
+  }, [isInReplayMode, rightPanelMode]);
+
   const handleDrop = useCallback(
     (reagentId: string, volume: number) => {
+      if (isInReplayMode) {
+        alert('请先结束回放模式');
+        return;
+      }
       if (isComplete && !isFreeMode) return;
       if (solution.volume + volume > 500) {
         alert('烧杯容量不足！最多500mL');
@@ -123,6 +161,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
       }
     },
     [
+      isInReplayMode,
       isComplete,
       isFreeMode,
       solution.volume,
@@ -148,14 +187,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   } = useDragDrop(handleDrop, 20);
 
   useEffect(() => {
-    if (showResult || isFreeMode) return;
+    if (showResult || isFreeMode || isInReplayMode) return;
 
     const timer = setInterval(() => {
       tickTime();
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [showResult, isFreeMode, tickTime]);
+  }, [showResult, isFreeMode, isInReplayMode, tickTime]);
 
   useEffect(() => {
     if (!isFreeMode && !level && levelId) {
@@ -170,6 +209,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
 
   const handleStir = () => {
     if (solution.volume === 0) return;
+    if (isInReplayMode) { alert('请先结束回放模式'); return; }
     setIsStirring(true);
     stir();
     setTimeout(() => setIsStirring(false), 2000);
@@ -177,14 +217,18 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
 
   const handlePourOut = () => {
     if (solution.volume === 0) return;
+    if (isInReplayMode) { alert('请先结束回放模式'); return; }
     pourOut(0.5);
   };
 
   const handleReset = () => {
+    if (isInReplayMode) { setReplayState(null); }
     resetBeaker();
     setShowResult(false);
     setShowHint(false);
     setScoreResult(null);
+    setRightPanelMode('default');
+    setCompareRecipe(null);
   };
 
   const handleExport = () => {
@@ -199,7 +243,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   };
 
   const handleImport = (recipe: Recipe) => {
-    return importRecipe(recipe);
+    if (isInReplayMode) { setReplayState(null); }
+    const result = importRecipe(recipe);
+    if (result.success) {
+      setRightPanelMode('default');
+      setCompareRecipe(null);
+    }
+    return result;
   };
 
   const handleClearLogs = () => {
@@ -209,6 +259,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
   };
 
   const handleBack = () => {
+    if (isInReplayMode) { setReplayState(null); }
     if (isFreeMode) {
       setMode('menu');
       navigate('/');
@@ -244,11 +295,161 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
     navigate('/');
   };
 
+  const handleStartReplay = useCallback(() => {
+    if (replaySteps.length <= 1) {
+      alert('请先做几步实验再回放！');
+      return;
+    }
+    setReplayState(replaySteps[0]);
+    setRightPanelMode('replay');
+  }, [replaySteps, setReplayState]);
+
+  const handleCloseReplay = useCallback(() => {
+    setReplayState(null);
+    setRightPanelMode('default');
+  }, [setReplayState]);
+
+  const handleOpenLibrary = useCallback(() => {
+    setRightPanelMode(rightPanelMode === 'library' ? 'default' : 'library');
+  }, [rightPanelMode]);
+
+  const handleStartCompare = useCallback(() => {
+    setRightPanelMode('compare-select');
+  }, []);
+
+  const handleSelectForCompare = useCallback((recipe: SavedRecipe) => {
+    setCompareRecipe(recipe);
+  }, []);
+
+  const handleCloseCompare = useCallback(() => {
+    setCompareRecipe(null);
+    setRightPanelMode('default');
+  }, []);
+
+  const handleLoadCompareRecipe = useCallback(() => {
+    if (!compareRecipe) return;
+    const result = loadSavedRecipe(compareRecipe.id);
+    if (result.success) {
+      playSuccess();
+      setCompareRecipe(null);
+      setRightPanelMode('default');
+    } else {
+      playFail();
+      alert('载入失败：' + (result.error || ''));
+    }
+  }, [compareRecipe, loadSavedRecipe, playSuccess, playFail]);
+
   const hasNextLevel = level
     ? LEVELS.findIndex(l => l.id === level.id) < LEVELS.length - 1
     : false;
 
   const displayScoreResult = scoreResult || lastScoreResult;
+
+  const renderRightPanel = () => {
+    if (rightPanelMode === 'replay' && isInReplayMode) {
+      return (
+        <ReplayPlayback
+          steps={replaySteps}
+          currentStep={currentReplayStep}
+          onStepChange={setReplayState}
+          onClose={handleCloseReplay}
+        />
+      );
+    }
+
+    if (rightPanelMode === 'library' || rightPanelMode === 'compare-select') {
+      return (
+        <RecipeLibrary
+          recipes={savedRecipes}
+          currentSolutionComponents={solution.components.map(c => ({ reagentId: c.reagentId, amount: c.amount }))}
+          onRefresh={refreshSavedRecipes}
+          onLoadRecipe={(id) => {
+            const result = loadSavedRecipe(id);
+            if (result.success) {
+              setRightPanelMode('default');
+              refreshSavedRecipes();
+            }
+            return result;
+          }}
+          onSaveRecipe={(name, notes) => {
+            const r = saveRecipeToLibrary(name, notes);
+            if (r) refreshSavedRecipes();
+            return r;
+          }}
+          onRenameRecipe={(id, name) => {
+            const r = renameSavedRecipe(id, name);
+            if (r) refreshSavedRecipes();
+            return r;
+          }}
+          onDeleteRecipe={(id) => {
+            const r = deleteSavedRecipe(id);
+            if (r) refreshSavedRecipes();
+            return r;
+          }}
+          onStartReplay={isFreeMode ? handleStartReplay : undefined}
+          onStartCompare={isFreeMode && rightPanelMode === 'library' ? handleStartCompare : undefined}
+          onClose={() => setRightPanelMode('default')}
+          compareMode={rightPanelMode === 'compare-select'}
+          onSelectForCompare={rightPanelMode === 'compare-select' ? handleSelectForCompare : undefined}
+        />
+      );
+    }
+
+    return (
+      <>
+        {!isFreeMode && level && (
+          <ObjectivePanel
+            level={level}
+            progress={objectiveProgress}
+            isComplete={isComplete}
+            showHint={showHint}
+            detailedCheck={detailedCheck}
+            starPrediction={starPrediction}
+            currentSteps={steps}
+          />
+        )}
+        <StatusPanel
+          solution={solution}
+          timeElapsed={timeElapsed}
+          steps={steps}
+        />
+        
+        <div className="hidden lg:block">
+          <ExperimentLog
+            logs={experimentLogs}
+            onClear={handleClearLogs}
+          />
+        </div>
+
+        {isFreeMode && (
+          <button
+            onClick={handleOpenLibrary}
+            className="w-full font-pixel text-xs text-yellow-400 bg-stone-800 border-2 border-yellow-600 py-2 px-4 hover:bg-stone-700 transition-colors"
+          >
+            📚 配方库（{savedRecipes.length}个配方）
+          </button>
+        )}
+
+        <div className="lg:hidden">
+          <button
+            onClick={() => setShowExperimentLog(!showExperimentLog)}
+            className="w-full font-pixel text-xs text-cyan-400 bg-stone-800 border-2 border-cyan-600 py-2 px-4 hover:bg-stone-700 transition-colors"
+          >
+            {showExperimentLog ? '▼ 隐藏实验记录' : '▶ 显示实验记录'}
+          </button>
+        </div>
+
+        {showExperimentLog && (
+          <div className="lg:hidden mt-4">
+            <ExperimentLog
+              logs={experimentLogs}
+              onClear={handleClearLogs}
+            />
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-stone-900 via-stone-800 to-stone-900 flex flex-col">
@@ -265,7 +466,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
                 setDragVolume={setDragVolume}
               />
               
-              {showExperimentLog && (
+              {rightPanelMode === 'default' && showExperimentLog && (
                 <div className="lg:hidden mt-4">
                   <ExperimentLog
                     logs={experimentLogs}
@@ -275,7 +476,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
               )}
             </div>
 
-            <div className="lg:col-span-5 flex flex-col items-center justify-center py-8">
+            <div className="lg:col-span-5 flex flex-col items-center justify-center py-8 relative">
+              {isInReplayMode && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-cyan-900 px-4 py-2 border-2 border-cyan-500 z-10">
+                  <span className="font-pixel text-xs text-cyan-300 animate-pulse">
+                    ▶ 回放模式中
+                  </span>
+                </div>
+              )}
               <Beaker
                 solution={solution}
                 isOver={isOver}
@@ -289,38 +497,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
             </div>
 
             <div className="lg:col-span-4 space-y-4">
-              {!isFreeMode && level && (
-                <ObjectivePanel
-                  level={level}
-                  progress={objectiveProgress}
-                  isComplete={isComplete}
-                  showHint={showHint}
-                  detailedCheck={detailedCheck}
-                  starPrediction={starPrediction}
-                  currentSteps={steps}
-                />
-              )}
-              <StatusPanel
-                solution={solution}
-                timeElapsed={timeElapsed}
-                steps={steps}
-              />
-              
-              <div className="hidden lg:block">
-                <ExperimentLog
-                  logs={experimentLogs}
-                  onClear={handleClearLogs}
-                />
-              </div>
-
-              <div className="lg:hidden">
-                <button
-                  onClick={() => setShowExperimentLog(!showExperimentLog)}
-                  className="w-full font-pixel text-xs text-cyan-400 bg-stone-800 border-2 border-cyan-600 py-2 px-4 hover:bg-stone-700 transition-colors"
-                >
-                  {showExperimentLog ? '▼ 隐藏实验记录' : '▶ 显示实验记录'}
-                </button>
-              </div>
+              {renderRightPanel()}
             </div>
           </div>
         </div>
@@ -335,7 +512,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
         onBack={handleBack}
         onHint={!isFreeMode ? handleHint : undefined}
         isFreeMode={isFreeMode}
-        disabled={isComplete && !isFreeMode}
+        disabled={(isComplete && !isFreeMode) || isInReplayMode}
       />
 
       {!isFreeMode && displayScoreResult && (
@@ -347,6 +524,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({ isFreeMode = false }) =>
           onNextLevel={handleNextLevel}
           onBackToMenu={handleBackToMenu}
           hasNextLevel={hasNextLevel}
+        />
+      )}
+
+      {compareRecipe && (
+        <RecipeCompare
+          leftName="当前实验"
+          leftSolution={solution}
+          leftSteps={steps}
+          rightRecipe={compareRecipe}
+          onClose={handleCloseCompare}
+          onLoadRight={handleLoadCompareRecipe}
         />
       )}
     </div>

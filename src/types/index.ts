@@ -145,3 +145,42 @@ export interface StarPrediction {
   maxPossibleStars: number;
   stepsToNextStar: number;
 }
+
+export interface SavedRecipe {
+  id: string;
+  name: string;
+  reagents: { id: string; amount: number }[];
+  result: {
+    ph: number;
+    temperature: number;
+    color: string;
+    hasGas: boolean;
+    hasPrecipitate: boolean;
+    precipitateColor?: string;
+    volume: number;
+  };
+  experimentLogs: ExperimentLog[];
+  createdAt: number;
+  updatedAt: number;
+  notes?: string;
+  steps: number;
+}
+
+export interface ReplayStep {
+  stepIndex: number;
+  solution: Solution;
+  logs: ExperimentLog[];
+  description: string;
+}
+
+export interface RecipeCompareData {
+  name: string;
+  ph: number;
+  temperature: number;
+  color: string;
+  hasGas: boolean;
+  hasPrecipitate: boolean;
+  volume: number;
+  steps: number;
+  reagents: { id: string; name: string; amount: number; formula: string }[];
+}
