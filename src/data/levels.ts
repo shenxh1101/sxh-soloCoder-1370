@@ -1,0 +1,128 @@
+import { Level } from '../types';
+
+export const LEVELS: Level[] = [
+  {
+    id: 'level-1',
+    name: '初识酸碱',
+    description: '配制pH值为7的中性溶液',
+    objective: {
+      type: 'ph',
+      targetValue: 7,
+      tolerance: 0.5,
+      description: '将溶液pH值调整到7±0.5',
+    },
+    availableReagents: ['hcl', 'naoh', 'phenolphthalein', 'water'],
+    maxSteps: 10,
+    starThresholds: { three: 4, two: 6, one: 10 },
+    hint: '尝试用盐酸和氢氧化钠相互中和，用酚酞指示终点',
+  },
+  {
+    id: 'level-2',
+    name: '蓝色消失',
+    description: '让蓝色石蕊试纸变红',
+    objective: {
+      type: 'ph',
+      targetValue: 4,
+      tolerance: 1,
+      description: '使溶液pH值小于5，让石蕊变红',
+    },
+    availableReagents: ['hcl', 'acetic', 'litmus', 'water'],
+    maxSteps: 5,
+    starThresholds: { three: 2, two: 3, one: 5 },
+    hint: '加入足够的酸性溶液即可',
+  },
+  {
+    id: 'level-3',
+    name: '红色警报',
+    description: '让酚酞溶液变成鲜艳的红色',
+    objective: {
+      type: 'color',
+      targetValue: '#ff4081',
+      tolerance: 30,
+      description: '加入碱性物质使酚酞变红',
+    },
+    availableReagents: ['naoh', 'ammonia', 'phenolphthalein', 'water'],
+    maxSteps: 5,
+    starThresholds: { three: 2, two: 3, one: 5 },
+    hint: '酚酞在pH>8.2时会变成粉红色',
+  },
+  {
+    id: 'level-4',
+    name: '气泡工厂',
+    description: '产生大量二氧化碳气体',
+    objective: {
+      type: 'gas',
+      targetValue: true,
+      tolerance: 0,
+      description: '让溶液持续产生气泡',
+    },
+    availableReagents: ['hcl', 'acetic', 'na2co3', 'nahco3', 'water'],
+    maxSteps: 5,
+    starThresholds: { three: 2, two: 3, one: 5 },
+    hint: '碳酸盐与酸反应会产生二氧化碳气体',
+  },
+  {
+    id: 'level-5',
+    name: '白色沉淀',
+    description: '生成白色沉淀',
+    objective: {
+      type: 'precipitate',
+      targetValue: '#ffffff',
+      tolerance: 0,
+      description: '让溶液底部出现白色沉淀',
+    },
+    availableReagents: ['agno3', 'nacl', 'bacl2', 'h2so4', 'na2co3', 'cacl2', 'water'],
+    maxSteps: 5,
+    starThresholds: { three: 2, two: 3, one: 5 },
+    hint: '银离子遇氯离子、钡离子遇硫酸根都会产生白色沉淀',
+  },
+  {
+    id: 'level-6',
+    name: '蓝色沉淀',
+    description: '生成漂亮的蓝色沉淀',
+    objective: {
+      type: 'precipitate',
+      targetValue: '#2196f3',
+      tolerance: 30,
+      description: '让溶液底部出现蓝色沉淀',
+    },
+    availableReagents: ['cuso4', 'naoh', 'ammonia', 'water'],
+    maxSteps: 5,
+    starThresholds: { three: 2, two: 3, one: 5 },
+    hint: '铜离子与氢氧根反应生成氢氧化铜蓝色沉淀',
+  },
+  {
+    id: 'level-7',
+    name: '冷热交替',
+    description: '将溶液温度提升到50°C以上',
+    objective: {
+      type: 'temperature',
+      targetValue: 50,
+      tolerance: 0,
+      description: '溶液温度≥50°C',
+    },
+    availableReagents: ['h2so4', 'naoh', 'hot-water', 'water'],
+    maxSteps: 5,
+    starThresholds: { three: 2, two: 3, one: 5 },
+    hint: '浓硫酸遇水会剧烈放热，或者直接加入热水',
+  },
+  {
+    id: 'level-8',
+    name: '精准中和',
+    description: '用最少的步骤将pH精确调到7.0',
+    objective: {
+      type: 'ph',
+      targetValue: 7,
+      tolerance: 0.1,
+      description: '将溶液pH值调整到7.0±0.1',
+    },
+    availableReagents: ['hcl', 'naoh', 'phenolphthalein', 'methyl-orange', 'water'],
+    maxSteps: 15,
+    starThresholds: { three: 5, two: 8, one: 15 },
+    hint: '先用指示剂判断大致范围，再逐滴调整',
+  },
+];
+
+export const getLevelById = (id: string): Level | undefined => {
+  return LEVELS.find(l => l.id === id);
+};
